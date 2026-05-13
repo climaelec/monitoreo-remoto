@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLIMAELEC — Monitor</title>
+
+<!-- ══════════════════════════════════════════
+     PWA — META TAGS
+     Permite instalar como app en Android e iOS
+══════════════════════════════════════════ -->
+<meta name="theme-color" content="#00aaff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CLIMAELEC">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="CLIMAELEC">
+<meta name="description" content="Monitor IoT de refrigeradores en tiempo real">
+
+<!-- ══════════════════════════════════════════
+     PWA — MANIFEST (inline, sin archivo externo)
+══════════════════════════════════════════ -->
+<script>
+// Genera el manifest.json y lo inyecta sin necesitar archivo externo
+const manifest = {
+  name: "CLIMAELEC Monitor",
+  short_name: "CLIMAELEC",
+  description: "Monitor IoT de refrigeradores en tiempo real",
+  start_url: "./",
+  display: "standalone",
+  background_color: "#07090f",
+  theme_color: "#00aaff",
+  orientation: "portrait-primary",
+  icons: [
+    {
+      src: "data:image/svg+xml," + encodeURIComponent(`
+        <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'>
+          <rect width='192' height='192' fill='%2307090f'/>
+          <rect x='16' y='16' width='160' height='160' rx='32' fill='%230c1220' stroke='%2300aaff' stroke-width='3'/>
+          <text x='96' y='115' font-family='monospace' font-size='72' font-weight='bold'
+                fill='%2300ffa3' text-anchor='middle'>C</text>
+        </svg>`),
+      sizes: "192x192",
+      type: "image/svg+xml",
+      purpose: "any maskable"
+    }
+  ]
+};
+const blob = new Blob([JSON.stringify(manifest)], {type: "application/json"});
+const url  = URL.createObjectURL(blob);
+const link = document.createElement("link");
+link.rel  = "manifest";
+link.href = url;
+document.currentScript.parentNode.appendChild(link);
+</script>
+
+<!-- ══════════════════════════════════════════
+     PWA — SERVICE WORKER (inline, sin archivo externo)
+     Permite funcionar offline y recibir notificaciones
+══════════════════════════════════════════ -->
+<script>
+if ("serviceWorker" in navigator) {
+  // Código del service worker como string
+  const swCode = `
+const CACHE_NAME = "climaelec-v1";
+const ASSETS = ["./"];
+
+// Instalar y cachear
+self.addEventListener("install", e => {
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c => c.addAll(ASSETS))
+  );
+  self.skipWaiting();
+});
+
+// Activar y limpiar caches viejos
+self.addEventListener("activate", e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+// Responder con cache o red
+self.addEventListener("fetch", e => {
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request).catch(() => caches.match("./")))
+  );
+});
+
+// Notificaciones push
+self.addEventListener("push", e => {
+  const data = e.data ? e.data.json() : { title: "CLIMAELEC", body: "Alerta activa" };
+  e.waitUntil(
+    self.registration.showNotification(data.title || "CLIMAELEC Alerta", {
+      body:    data.body   || "Verificar el equipo",
+      icon:    data.icon   || "./",
+      badge:   data.badge  || "./",
+      vibrate: [300, 100, 300, 100, 300],
+      tag:     "climaelec-alarm",
+      renotify: true,
+      requireInteraction: true,
+      actions: [
+        { action: "ver",       title: "Ver Dashboard" },
+        { action: "silenciar", title: "Silenciar"     }
+      ]
+    })
+  );
+});
+
+// Click en notificacion
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  if (e.action === "ver" || !e.action) {
+    e.waitUntil(clients.openWindow("./"));
+  }
+});
+`;
+
+  // Registrar el SW desde un blob URL
+  const swBlob = new Blob([swCode], { type: "application/javascript" });
+  const swUrl  = URL.createObjectURL(swBlob);
+
+  navigator.serviceWorker.register(swUrl, { scope: "./" })
+    .then(reg => {
+      console.log("✅ Service Worker registrado");
+      window._swReg = reg;
+    })
+    .catch(err => console.warn("SW no disponible:", err));
+}
+</script>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+
+<style>
+/* ══════════════════════════════════════════
+   TOKENS
+══════════════════════════════════════════ */
+:root {
+  --bg:          #07090f;
+  --surface:     #0c1220;
+  --surface2:    #111927;
+  --border:      #1c2e44;
+  --border2:     #243344;
+  --ok:          #00ffa3;
+  --ok-dim:      rgba(0,255,163,0.08);
+  --warn:        #ffb300;
+  --warn-dim:    rgba(255,179,0,0.08);
+  --err:         #ff3d57;
+  --err-dim:     rgba(255,61,87,0.08);
+  --accent:      #00aaff;
+  --accent-dim:  rgba(0,170,255,0.08);
+  --text:        #8fa8bf;
+  --text-hi:     #dceeff;
+  --muted:       #334d65;
+  --mono:        'JetBrains Mono', monospace;
+  --display:     'Rajdhani', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--display);
+  min-height: 100vh;
+  overflow-x: hidden;
+  transition: background 0.6s ease;
+}
+
+/* scanlines */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+  pointer-events: none; z-index: 100;
+}
+
+/* grid bg */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: linear-gradient(rgba(0,170,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(0,170,255,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none; z-index: 0;
+}
+
+/* ── ALARM OVERLAY ── */
+#alarm-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(255,30,50,0.05);
+  animation: pulseAlarm 1s ease-in-out infinite;
+  pointer-events: none; z-index: 10;
+}
+@keyframes pulseAlarm { 0%,100%{opacity:0} 50%{opacity:1} }
+
+/* ── INSTALL BANNER ── */
+#install-banner {
+  display: none;
+  align-items: center; gap: 12px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(0,170,255,0.3);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  animation: slideDown 0.3s ease;
+}
+#install-banner span { flex:1; font-family:var(--mono); font-size:12px; color:var(--accent); }
+#install-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+#install-btn:hover { opacity: 0.85; }
+
+/* ── NOTIF BANNER ── */
+#notif-banner {
+  display: none;
+  align-items: center; gap: 12px;
+  background: rgba(255,179,0,0.06);
+  border: 1px solid rgba(255,179,0,0.25);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+}
+#notif-banner span { flex:1; font-family:var(--mono); font-size:12px; color:var(--warn); }
+#notif-btn {
+  background: var(--warn);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── WRAPPER ── */
+.wrapper { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+
+/* ── HEADER ── */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 32px; gap: 16px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 20px;
+}
+.logo { display: flex; flex-direction: column; gap: 2px; }
+.logo-eyebrow { font-family:var(--mono); font-size:9px; letter-spacing:0.3em; text-transform:uppercase; color:var(--muted); }
+.logo-title { font-family:var(--display); font-size:clamp(28px,5vw,42px); font-weight:700; color:var(--text-hi); letter-spacing:0.12em; text-transform:uppercase; line-height:1; }
+.logo-title span { color:var(--accent); text-shadow:0 0 20px var(--accent); }
+.header-right { display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+
+#mqtt-badge {
+  display:flex; align-items:center; gap:8px;
+  background:var(--surface); border:1px solid var(--border); border-radius:6px;
+  padding:7px 14px; font-family:var(--mono); font-size:11px; color:var(--muted); transition:all 0.4s;
+}
+#mqtt-badge.ok  { color:var(--ok);  border-color:rgba(0,255,163,0.3); background:var(--ok-dim); }
+#mqtt-badge.err { color:var(--err); border-color:rgba(255,61,87,0.3); background:var(--err-dim); }
+.mqtt-dot { width:7px; height:7px; border-radius:50%; background:var(--muted); transition:all 0.4s; }
+#mqtt-badge.ok .mqtt-dot  { background:var(--ok);  box-shadow:0 0 8px var(--ok);  animation:blink 2s infinite; }
+#mqtt-badge.err .mqtt-dot { background:var(--err); box-shadow:0 0 8px var(--err); }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+#equipo-badge { font-family:var(--mono); font-size:12px; color:var(--accent); letter-spacing:0.05em; }
+
+/* ── ALARM BANNER ── */
+#alarm-banner {
+  display:none; align-items:center; gap:16px;
+  background:var(--err-dim); border:1px solid rgba(255,61,87,0.5);
+  border-radius:12px; padding:16px 22px; margin-bottom:24px;
+  animation:slideDown 0.3s ease;
+}
+@keyframes slideDown { from{opacity:0;transform:translateY(-12px)} to{opacity:1;transform:translateY(0)} }
+.alarm-icon { font-size:28px; animation:rock 0.6s ease-in-out infinite alternate; }
+@keyframes rock { from{transform:rotate(-10deg)} to{transform:rotate(10deg)} }
+.alarm-text strong { display:block; color:var(--err); font-size:17px; font-weight:600; letter-spacing:0.05em; }
+.alarm-text span   { font-size:13px; color:#ff8a96; font-family:var(--mono); }
+
+/* ── MUTE BUTTON ── */
+#mute-btn {
+  display:none; align-items:center; gap:8px;
+  background:var(--surface2); border:1px solid rgba(255,61,87,0.4);
+  border-radius:8px; padding:9px 16px;
+  font-family:var(--mono); font-size:11px; color:var(--err);
+  cursor:pointer; letter-spacing:0.08em; transition:all 0.2s; flex-shrink:0;
+}
+#mute-btn:hover { background:var(--err-dim); border-color:var(--err); box-shadow:0 0 12px rgba(255,61,87,0.2); }
+#mute-btn.muted { color:var(--muted); border-color:var(--border); background:var(--surface); }
+#mute-icon { font-size:14px; }
+
+/* ── HERO ROW ── */
+.hero-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+
+.hero-card {
+  background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  padding:28px 24px; position:relative; overflow:hidden; transition:border-color 0.4s, box-shadow 0.4s;
+}
+.hero-card::before {
+  content:''; position:absolute; top:-80px; right:-80px;
+  width:220px; height:220px; border-radius:50%; background:var(--accent-dim); transition:background 0.4s;
+}
+.hero-card.state-ok   { border-color:rgba(0,255,163,0.25); box-shadow:0 0 40px rgba(0,255,163,0.06); }
+.hero-card.state-ok::before   { background:var(--ok-dim); }
+.hero-card.state-warn { border-color:rgba(255,179,0,0.3);  box-shadow:0 0 40px rgba(255,179,0,0.06); }
+.hero-card.state-warn::before { background:var(--warn-dim); }
+.hero-card.state-err  { border-color:rgba(255,61,87,0.35); box-shadow:0 0 40px rgba(255,61,87,0.08); }
+.hero-card.state-err::before  { background:var(--err-dim); }
+
+.hero-label { font-family:var(--mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; position:relative; z-index:1; }
+.hero-value { font-family:var(--display); font-size:clamp(52px,10vw,80px); font-weight:700; line-height:1; color:var(--accent); letter-spacing:-0.02em; position:relative; z-index:1; transition:color 0.4s, text-shadow 0.4s; }
+.hero-value.state-ok   { color:var(--ok);   text-shadow:0 0 30px rgba(0,255,163,0.4); }
+.hero-value.state-warn { color:var(--warn);  text-shadow:0 0 30px rgba(255,179,0,0.4); }
+.hero-value.state-err  { color:var(--err);   text-shadow:0 0 30px rgba(255,61,87,0.4); }
+.hero-unit { font-size:22px; color:var(--muted); font-weight:400; }
+
+.temp-track { height:4px; background:rgba(255,255,255,0.05); border-radius:4px; margin-top:18px; overflow:hidden; position:relative; z-index:1; }
+#temp-bar { height:100%; width:0%; border-radius:4px; background:var(--ok); transition:width 0.9s cubic-bezier(0.4,0,0.2,1), background 0.4s; }
+.temp-range-labels { display:flex; justify-content:space-between; font-family:var(--mono); font-size:9px; color:var(--muted); margin-top:6px; position:relative; z-index:1; }
+
+.estado-icon  { font-size:40px; margin-bottom:10px; position:relative; z-index:1; display:block; }
+.estado-label { font-size:13px; font-family:var(--mono); color:var(--muted); margin-bottom:6px; position:relative; z-index:1; }
+#estado-text  { font-family:var(--display); font-size:32px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--ok); position:relative; z-index:1; transition:color 0.4s; }
+
+/* ── CARDS GRID ── */
+.cards-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:16px; }
+
+.card {
+  background:var(--surface); border:1px solid var(--border); border-radius:14px;
+  padding:20px; position:relative; overflow:hidden; transition:border-color 0.3s, transform 0.2s;
+}
+.card:hover { transform:translateY(-2px); border-color:var(--border2); }
+.card::before { content:''; position:absolute; top:0; left:20px; right:20px; height:1px; background:linear-gradient(90deg,transparent,var(--accent-dim),transparent); }
+.card-label { font-family:var(--mono); font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:7px; }
+.card-label-dot { width:5px; height:5px; border-radius:50%; background:var(--muted); flex-shrink:0; }
+.card-value { font-family:var(--display); font-size:34px; font-weight:700; color:var(--text-hi); line-height:1; transition:color 0.4s, text-shadow 0.4s; }
+.card-value .unit { font-size:15px; color:var(--muted); font-weight:400; }
+.card-value.c-ok   { color:var(--ok);   text-shadow:0 0 16px rgba(0,255,163,0.3); }
+.card-value.c-warn { color:var(--warn);  text-shadow:0 0 16px rgba(255,179,0,0.3); }
+.card-value.c-err  { color:var(--err);   text-shadow:0 0 16px rgba(255,61,87,0.3); }
+.card-bar { height:2px; background:rgba(255,255,255,0.04); border-radius:2px; margin-top:16px; overflow:hidden; }
+.card-bar-fill { height:100%; border-radius:2px; background:var(--accent); transition:width 0.9s cubic-bezier(0.4,0,0.2,1), background 0.4s; }
+
+.signal-row { display:flex; align-items:flex-end; gap:4px; margin-top:12px; }
+.signal-row span { width:11px; border-radius:2px 2px 0 0; background:var(--border); transition:background 0.3s, box-shadow 0.3s; }
+.signal-row span.s-ok  { background:var(--ok);  box-shadow:0 0 6px rgba(0,255,163,0.4); }
+.signal-row span.s-err { background:var(--err);  box-shadow:0 0 6px rgba(255,61,87,0.4); }
+
+/* ── LOG ── */
+.log-wrap { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+.log-header { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--border); background:var(--surface2); }
+.log-title { font-family:var(--mono); font-size:10px; letter-spacing:0.2em; text-transform:uppercase; color:var(--muted); }
+#log-count { font-family:var(--mono); font-size:10px; color:var(--accent); background:var(--accent-dim); padding:2px 9px; border-radius:4px; }
+#log-box { height:148px; overflow-y:auto; padding:12px 16px; font-family:var(--mono); font-size:11px; line-height:1.8; color:var(--muted); scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+#log-box::-webkit-scrollbar { width:3px; }
+#log-box::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.log-row { display:flex; gap:10px; }
+.log-ts  { color:var(--muted); opacity:0.5; flex-shrink:0; }
+.log-ok   { color:var(--ok); }
+.log-warn { color:var(--warn); }
+.log-err  { color:var(--err); }
+.log-info { color:var(--accent); }
+
+#actualizacion { text-align:center; font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:20px; letter-spacing:0.08em; }
+
+@media (max-width:600px) {
+  .hero-row { grid-template-columns:1fr; }
+  .hero-value { font-size:64px; }
+}
+</style>
+</head>
+<body>
+
+<div id="alarm-overlay"></div>
+
+<div class="wrapper">
+
+  <!-- ── BANNER INSTALAR APP ── -->
+  <div id="install-banner">
+    <span>📲 Instalar CLIMAELEC como app en este dispositivo</span>
+    <button id="install-btn" onclick="instalarApp()">INSTALAR</button>
+  </div>
+
+  <!-- ── BANNER ACTIVAR NOTIFICACIONES ── -->
+  <div id="notif-banner">
+    <span>🔔 Activar notificaciones para recibir alertas aunque la app esté cerrada</span>
+    <button id="notif-btn" onclick="pedirNotificaciones()">ACTIVAR</button>
+  </div>
+
+  <!-- ── HEADER ── -->
+  <header>
+    <div class="logo">
+      <span class="logo-eyebrow">Sistema de monitoreo IoT</span>
+      <div class="logo-title">CLIMA<span>ELEC</span></div>
+    </div>
+    <div class="header-right">
+      <div id="mqtt-badge" class="err">
+        <div class="mqtt-dot"></div>
+        <span id="mqtt-text">DESCONECTADO</span>
+      </div>
+      <div id="equipo-badge">---</div>
+    </div>
+  </header>
+
+  <!-- ── ALARM BANNER ── -->
+  <div id="alarm-banner">
+    <div class="alarm-icon">🚨</div>
+    <div class="alarm-text">
+      <strong>ALERTA ACTIVA</strong>
+      <span id="alarm-detail">Verificar el equipo inmediatamente</span>
+    </div>
+    <button id="mute-btn" onclick="toggleMute()">
+      <span id="mute-icon">🔔</span>
+      <span id="mute-text">SILENCIAR</span>
+    </button>
+  </div>
+
+  <!-- ── HERO ROW ── -->
+  <div class="hero-row">
+    <div class="hero-card" id="temp-card">
+      <div class="hero-label">Temperatura interior</div>
+      <div class="hero-value" id="temp">--.-<span class="hero-unit"> °C</span></div>
+      <div class="temp-track"><div id="temp-bar"></div></div>
+      <div class="temp-range-labels">
+        <span>-10°C</span>
+        <span style="color:rgba(0,255,163,0.5)">-5–7°C ✓</span>
+        <span>40°C</span>
+      </div>
+    </div>
+    <div class="hero-card" id="estado-card">
+      <div class="hero-label">Estado del sistema</div>
+      <span class="estado-icon" id="estado-icon">❄️</span>
+      <div class="estado-label">Diagnóstico actual</div>
+      <div id="estado-text">ESPERANDO…</div>
+    </div>
+  </div>
+
+  <!-- ── CARDS GRID ── -->
+  <div class="cards-grid">
+    <div class="card">
+      <div class="card-label"><span class="card-label-dot"></span>Voltaje</div>
+      <div class="card-value" id="voltaje">---<span class="unit"> V</span></div>
+      <div class="card-bar"><div class="card-bar-fill" id="volt-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-label"><span class="card-label-dot"></span>Estado Voltaje</div>
+      <div class="card-value c-ok" id="voltajeEstado">NORMAL</div>
+    </div>
+    <div class="card">
+      <div class="card-label"><span class="card-label-dot"></span>Corriente</div>
+      <div class="card-value" id="corriente">---<span class="unit"> A</span></div>
+      <div class="card-bar"><div class="card-bar-fill" id="corr-bar" style="width:0%;background:var(--warn)"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-label"><span class="card-label-dot"></span>Señal WiFi</div>
+      <div class="card-value" id="wifi">---<span class="unit"> dBm</span></div>
+      <div class="signal-row" id="signal-bars">
+        <span style="height:8px"></span>
+        <span style="height:14px"></span>
+        <span style="height:20px"></span>
+        <span style="height:26px"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LOG ── -->
+  <div class="log-wrap">
+    <div class="log-header">
+      <div class="log-title">▸ Registro de eventos</div>
+      <div id="log-count">0 eventos</div>
+    </div>
+    <div id="log-box"></div>
+  </div>
+
+  <div id="actualizacion">Esperando datos…</div>
+
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  CONFIG
+// ══════════════════════════════════════════
+const MQTT_URL       = "wss://broker.emqx.io:8084/mqtt";
+const TOPIC          = "climaelec/equipo1";
+const TEMP_OK_MIN    = -5;
+const TEMP_OK_MAX    =  7;
+const VOLT_ERR_LO    = 110;
+const VOLT_WARN_LO   = 210;
+const VOLT_ERR_HI    = 240;
+const TEMP_SCALE_MIN = -10;
+const TEMP_SCALE_MAX =  40;
+
+let logCount   = 0;
+let silenciado = false;
+
+// ══════════════════════════════════════════
+//  PWA — INSTALAR APP
+// ══════════════════════════════════════════
+let deferredPrompt = null;
+
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // Mostrar banner de instalación
+  document.getElementById("install-banner").style.display = "flex";
+  addLog("App disponible para instalar — toca INSTALAR", "info");
+});
+
+function instalarApp() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(result => {
+    if (result.outcome === "accepted") {
+      addLog("✅ App instalada correctamente", "ok");
+      document.getElementById("install-banner").style.display = "none";
+    } else {
+      addLog("Instalación cancelada", "warn");
+    }
+    deferredPrompt = null;
+  });
+}
+
+window.addEventListener("appinstalled", () => {
+  document.getElementById("install-banner").style.display = "none";
+  addLog("✅ CLIMAELEC instalada como app", "ok");
+});
+
+// ══════════════════════════════════════════
+//  PWA — NOTIFICACIONES PUSH
+// ══════════════════════════════════════════
+function pedirNotificaciones() {
+  if (!("Notification" in window)) {
+    addLog("Este navegador no soporta notificaciones", "warn");
+    return;
+  }
+  Notification.requestPermission().then(perm => {
+    if (perm === "granted") {
+      addLog("✅ Notificaciones activadas — recibirás alertas aunque la app esté cerrada", "ok");
+      document.getElementById("notif-banner").style.display = "none";
+      // Notificación de prueba
+      new Notification("CLIMAELEC ✅", {
+        body: "Notificaciones activadas correctamente",
+        icon: "./"
+      });
+    } else {
+      addLog("Notificaciones rechazadas por el usuario", "warn");
+    }
+  });
+}
+
+function notificarAlarma(detalle) {
+  if (Notification.permission === "granted") {
+    new Notification("🚨 CLIMAELEC — ALERTA", {
+      body:    detalle || "Verificar el equipo inmediatamente",
+      icon:    "./",
+      tag:     "climaelec-alarm",
+      renotify: true,
+      requireInteraction: true
+    });
+  }
+}
+
+// Mostrar banner de notificaciones si no están activadas
+window.addEventListener("load", () => {
+  if ("Notification" in window && Notification.permission === "default") {
+    document.getElementById("notif-banner").style.display = "flex";
+  }
+});
+
+// ══════════════════════════════════════════
+//  SILENCIAR ALARMA
+// ══════════════════════════════════════════
+function toggleMute() {
+  silenciado = !silenciado;
+  const btn  = document.getElementById("mute-btn");
+  const icon = document.getElementById("mute-icon");
+  const txt  = document.getElementById("mute-text");
+  if (silenciado) {
+    btn.classList.add("muted");
+    icon.textContent = "🔕";
+    txt.textContent  = "ACTIVAR SONIDO";
+    addLog("Alarma sonora silenciada", "warn");
+  } else {
+    btn.classList.remove("muted");
+    icon.textContent = "🔔";
+    txt.textContent  = "SILENCIAR";
+    addLog("Alarma sonora reactivada", "info");
+  }
+}
+
+// ══════════════════════════════════════════
+//  AUDIO ALARMA
+// ══════════════════════════════════════════
+let audioContext;
+let alarmaActiva = false;
+
+function sonarAlarma() {
+  if (alarmaActiva || silenciado) return;
+  alarmaActiva = true;
+  if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const osc  = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 900;
+  gain.gain.value = 0.2;
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+  osc.start();
+  setTimeout(() => { osc.stop(); alarmaActiva = false; }, 700);
+}
+
+// ══════════════════════════════════════════
+//  MQTT
+// ══════════════════════════════════════════
+const client = mqtt.connect(MQTT_URL);
+
+client.on("connect", () => {
+  setBadge("ok", "CONECTADO");
+  addLog("MQTT conectado — topic: " + TOPIC, "info");
+  client.subscribe(TOPIC);
+});
+client.on("error",   err => { setBadge("err", "ERROR MQTT");    addLog("Error MQTT: " + err.message, "err"); });
+client.on("offline", ()  => { setBadge("err", "DESCONECTADO"); addLog("MQTT desconectado", "err"); });
+client.on("message", (topic, message) => {
+  try { update(JSON.parse(message.toString())); }
+  catch(e) { addLog("Error JSON: " + e.message, "err"); }
+});
+
+// ══════════════════════════════════════════
+//  UPDATE DASHBOARD
+// ══════════════════════════════════════════
+function update(d) {
+  const temp = parseFloat(d.temp);
+  const volt = parseFloat(d.voltaje);
+  const corr = parseFloat(d.corriente);
+  const rssi = parseInt(d.wifi);
+
+  document.getElementById("equipo-badge").textContent = d.equipo || "---";
+
+  // Temperatura
+  document.getElementById("temp").innerHTML = (isNaN(temp) ? "--.-" : temp.toFixed(1)) + '<span class="hero-unit"> °C</span>';
+  let tempState = "ok";
+  if (temp > TEMP_OK_MAX)      tempState = "err";
+  else if (temp < TEMP_OK_MIN) tempState = "warn";
+  applyHeroState("temp-card", "temp", tempState);
+  const pct = Math.min(100, Math.max(0, ((temp - TEMP_SCALE_MIN) / (TEMP_SCALE_MAX - TEMP_SCALE_MIN)) * 100));
+  const tBar = document.getElementById("temp-bar");
+  tBar.style.width = pct + "%";
+  tBar.style.background = tempState === "err" ? "var(--err)" : tempState === "warn" ? "var(--warn)" : "var(--ok)";
+
+  // Voltaje
+  document.getElementById("voltaje").innerHTML = (isNaN(volt) ? "---" : volt.toFixed(1)) + '<span class="unit"> V</span>';
+  let voltState = "ok";
+  if (volt === 0 || volt < VOLT_ERR_LO || volt > VOLT_ERR_HI) voltState = "err";
+  else if (volt < VOLT_WARN_LO) voltState = "warn";
+  setCardColor("voltaje", voltState);
+  document.getElementById("voltajeEstado").textContent = d.alarmaVoltaje || "NORMAL";
+  setCardColor("voltajeEstado", voltState);
+  const vBar = document.getElementById("volt-bar");
+  vBar.style.width = Math.min(100, Math.max(0, (volt / 260) * 100)) + "%";
+  vBar.style.background = voltState === "err" ? "var(--err)" : voltState === "warn" ? "var(--warn)" : "var(--ok)";
+
+  // Corriente
+  document.getElementById("corriente").innerHTML = (isNaN(corr) ? "---" : corr.toFixed(2)) + '<span class="unit"> A</span>';
+  document.getElementById("corr-bar").style.width = Math.min(100, Math.max(0, (corr / 20) * 100)) + "%";
+
+  // WiFi
+  document.getElementById("wifi").innerHTML = (isNaN(rssi) ? "---" : rssi) + '<span class="unit"> dBm</span>';
+  updateSignal(rssi);
+  setCardColor("wifi", rssi < -80 ? "err" : "ok");
+
+  // Alarma general
+  const hayAlarma = (d.alarmaVoltaje && d.alarmaVoltaje !== "NORMAL")
+                  || (d.alarmaTemp   && d.alarmaTemp    !== "NORMAL");
+
+  const banner  = document.getElementById("alarm-banner");
+  const overlay = document.getElementById("alarm-overlay");
+
+  if (hayAlarma) {
+    document.getElementById("estado-card").className = "hero-card state-err";
+    document.getElementById("estado-text").style.color = "var(--err)";
+    document.getElementById("estado-text").textContent = "ALERTA";
+    document.getElementById("estado-icon").textContent = "⚠️";
+    banner.style.display = "flex";
+    document.getElementById("mute-btn").style.display = "flex";
+    overlay.style.display = "block";
+    document.body.style.background = "#110306";
+
+    let detalles = [];
+    if (d.alarmaTemp    && d.alarmaTemp    !== "NORMAL") detalles.push("Temp: " + d.alarmaTemp);
+    if (d.alarmaVoltaje && d.alarmaVoltaje !== "NORMAL") detalles.push("Volt: " + d.alarmaVoltaje);
+    const detalleTxt = detalles.join("  |  ");
+    document.getElementById("alarm-detail").textContent = detalleTxt;
+
+    sonarAlarma();
+    notificarAlarma(detalleTxt);  // notificación push al celular
+    addLog("⚠ ALERTA — " + detalleTxt, "err");
+
+  } else {
+    document.getElementById("estado-card").className = "hero-card state-ok";
+    document.getElementById("estado-text").style.color = "var(--ok)";
+    document.getElementById("estado-text").textContent = "NORMAL";
+    document.getElementById("estado-icon").textContent = "❄️";
+    banner.style.display = "none";
+    document.getElementById("mute-btn").style.display = "none";
+    if (silenciado) {
+      silenciado = false;
+      document.getElementById("mute-btn").classList.remove("muted");
+      document.getElementById("mute-icon").textContent = "🔔";
+      document.getElementById("mute-text").textContent = "SILENCIAR";
+    }
+    overlay.style.display = "none";
+    document.body.style.background = "var(--bg)";
+    addLog(`OK — T:${temp.toFixed(1)}°C  V:${volt.toFixed(1)}V  I:${corr.toFixed(2)}A  WiFi:${rssi}dBm`, "ok");
+  }
+
+  document.getElementById("actualizacion").textContent =
+    "Última actualización: " + new Date().toLocaleTimeString("es-CL");
+}
+
+// ══════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════
+function setBadge(cls, txt) {
+  const el = document.getElementById("mqtt-badge");
+  el.className = cls;
+  document.getElementById("mqtt-text").textContent = txt;
+}
+function applyHeroState(cardId, valId, state) {
+  document.getElementById(cardId).className = "hero-card state-" + state;
+  document.getElementById(valId).className  = "hero-value state-" + state;
+}
+function setCardColor(id, state) {
+  document.getElementById(id).className = "card-value c-" + state;
+}
+function updateSignal(rssi) {
+  const bars  = document.querySelectorAll("#signal-bars span");
+  let   level = 0;
+  if (rssi >= -50)      level = 4;
+  else if (rssi >= -65) level = 3;
+  else if (rssi >= -75) level = 2;
+  else if (rssi >= -90) level = 1;
+  const cls = rssi < -80 ? "s-err" : "s-ok";
+  bars.forEach((b, i) => b.className = i < level ? cls : "");
+}
+function addLog(msg, type = "ok") {
+  const box = document.getElementById("log-box");
+  logCount++;
+  document.getElementById("log-count").textContent = logCount + " eventos";
+  const row = document.createElement("div");
+  row.className = "log-row";
+  row.innerHTML = `<span class="log-ts">[${new Date().toLocaleTimeString("es-CL")}]</span>`
+                + `<span class="log-${type}">${msg}</span>`;
+  box.insertBefore(row, box.firstChild);
+  while (box.children.length > 80) box.removeChild(box.lastChild);
+}
+
+addLog("Dashboard CLIMAELEC iniciado — conectando a MQTT…", "info");
+</script>
+</body>
+</html>
