@@ -197,6 +197,34 @@ body::before {
 }
 @keyframes pulseAlarm { 0%,100%{opacity:0} 50%{opacity:1} }
 
+/* ── AUDIO UNLOCK BANNER ── */
+#audio-banner {
+  display: flex;
+  align-items: center; gap: 12px;
+  background: rgba(0,255,163,0.06);
+  border: 1px solid rgba(0,255,163,0.3);
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  animation: slideDown 0.3s ease;
+}
+#audio-banner span { flex:1; font-family:var(--mono); font-size:12px; color:var(--ok); }
+#audio-btn {
+  background: var(--ok);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+#audio-btn:hover { opacity: 0.85; }
+
 /* ── INSTALL BANNER ── */
 #install-banner {
   display: none;
@@ -358,6 +386,97 @@ header {
 .signal-row span.s-ok  { background:var(--ok);  box-shadow:0 0 6px rgba(0,255,163,0.4); }
 .signal-row span.s-err { background:var(--err);  box-shadow:0 0 6px rgba(255,61,87,0.4); }
 
+/* ── CONFIG PANEL ── */
+#config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: 14px;
+  transition: all 0.2s;
+  width: fit-content;
+}
+#config-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+#config-panel {
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 16px;
+  animation: slideDown 0.3s ease;
+}
+.config-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.config-field { display: flex; flex-direction: column; gap: 6px; }
+.config-field label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.config-field input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text-hi);
+  outline: none;
+  transition: border-color 0.2s;
+}
+.config-field input:focus { border-color: var(--accent); }
+.config-actions { display: flex; gap: 10px; }
+.btn-save {
+  background: var(--ok);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 9px 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  transition: opacity 0.2s;
+}
+.btn-save:hover { opacity: 0.85; }
+.btn-reset {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 20px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  transition: all 0.2s;
+}
+.btn-reset:hover { border-color: var(--err); color: var(--err); }
+
 /* ── LOG ── */
 .log-wrap { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
 .log-header { display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid var(--border); background:var(--surface2); }
@@ -386,6 +505,12 @@ header {
 <div id="alarm-overlay"></div>
 
 <div class="wrapper">
+
+  <!-- ── BANNER ACTIVAR AUDIO ── -->
+  <div id="audio-banner">
+    <span>🔊 Toca una vez para activar el sonido de alarmas</span>
+    <button id="audio-btn" onclick="activarAudio()">ACTIVAR SONIDO</button>
+  </div>
 
   <!-- ── BANNER INSTALAR APP ── -->
   <div id="install-banner">
@@ -475,6 +600,41 @@ header {
     </div>
   </div>
 
+  <!-- ── PANEL DE CONFIGURACIÓN ── -->
+  <div id="config-toggle" onclick="toggleConfig()">
+    ⚙️ &nbsp;CONFIGURAR UMBRALES DE ALARMA
+  </div>
+
+  <div id="config-panel">
+    <div class="config-title">▸ Umbrales de alarma — se guardan en este dispositivo</div>
+    <div class="config-grid">
+      <div class="config-field">
+        <label>Temp. máxima (°C)</label>
+        <input type="number" id="cfg-temp-max" step="0.5" placeholder="7">
+      </div>
+      <div class="config-field">
+        <label>Temp. mínima (°C)</label>
+        <input type="number" id="cfg-temp-min" step="0.5" placeholder="-5">
+      </div>
+      <div class="config-field">
+        <label>Voltaje mínimo (V)</label>
+        <input type="number" id="cfg-volt-lo" step="1" placeholder="110">
+      </div>
+      <div class="config-field">
+        <label>Voltaje alerta (V)</label>
+        <input type="number" id="cfg-volt-warn" step="1" placeholder="210">
+      </div>
+      <div class="config-field">
+        <label>Voltaje máximo (V)</label>
+        <input type="number" id="cfg-volt-hi" step="1" placeholder="240">
+      </div>
+    </div>
+    <div class="config-actions">
+      <button class="btn-save" onclick="guardarConfig()">✓ GUARDAR</button>
+      <button class="btn-reset" onclick="resetConfig()">↺ RESTAURAR DEFAULTS</button>
+    </div>
+  </div>
+
   <!-- ── LOG ── -->
   <div class="log-wrap">
     <div class="log-header">
@@ -494,16 +654,76 @@ header {
 // ══════════════════════════════════════════
 const MQTT_URL       = "wss://broker.emqx.io:8084/mqtt";
 const TOPIC          = "climaelec/equipo1";
-const TEMP_OK_MIN    = -5;
-const TEMP_OK_MAX    =  7;
-const VOLT_ERR_LO    = 110;
-const VOLT_WARN_LO   = 210;
-const VOLT_ERR_HI    = 240;
 const TEMP_SCALE_MIN = -10;
 const TEMP_SCALE_MAX =  40;
 
+function cargarConfig() {
+  return {
+    TEMP_OK_MIN:  parseFloat(localStorage.getItem("cfg_temp_min")  ?? -5),
+    TEMP_OK_MAX:  parseFloat(localStorage.getItem("cfg_temp_max")  ??  7),
+    VOLT_ERR_LO:  parseFloat(localStorage.getItem("cfg_volt_lo")   ?? 110),
+    VOLT_WARN_LO: parseFloat(localStorage.getItem("cfg_volt_warn") ?? 210),
+    VOLT_ERR_HI:  parseFloat(localStorage.getItem("cfg_volt_hi")   ?? 240),
+  };
+}
+let CFG = cargarConfig();
+
 let logCount   = 0;
 let silenciado = false;
+
+// ══════════════════════════════════════════
+//  PANEL DE CONFIGURACIÓN
+// ══════════════════════════════════════════
+function toggleConfig() {
+  const panel = document.getElementById("config-panel");
+  const abierto = panel.style.display === "block";
+  if (!abierto) {
+    // Rellenar inputs con valores actuales
+    document.getElementById("cfg-temp-max").value  = CFG.TEMP_OK_MAX;
+    document.getElementById("cfg-temp-min").value  = CFG.TEMP_OK_MIN;
+    document.getElementById("cfg-volt-lo").value   = CFG.VOLT_ERR_LO;
+    document.getElementById("cfg-volt-warn").value = CFG.VOLT_WARN_LO;
+    document.getElementById("cfg-volt-hi").value   = CFG.VOLT_ERR_HI;
+  }
+  panel.style.display = abierto ? "none" : "block";
+}
+
+function guardarConfig() {
+  const tempMax  = parseFloat(document.getElementById("cfg-temp-max").value);
+  const tempMin  = parseFloat(document.getElementById("cfg-temp-min").value);
+  const voltLo   = parseFloat(document.getElementById("cfg-volt-lo").value);
+  const voltWarn = parseFloat(document.getElementById("cfg-volt-warn").value);
+  const voltHi   = parseFloat(document.getElementById("cfg-volt-hi").value);
+
+  // Validaciones básicas
+  if (tempMin >= tempMax) {
+    addLog("⚠ Error: Temp. mínima debe ser menor que la máxima", "err"); return;
+  }
+  if (voltLo >= voltWarn || voltWarn >= voltHi) {
+    addLog("⚠ Error: Voltajes deben ser en orden creciente", "err"); return;
+  }
+
+  localStorage.setItem("cfg_temp_min",  tempMin);
+  localStorage.setItem("cfg_temp_max",  tempMax);
+  localStorage.setItem("cfg_volt_lo",   voltLo);
+  localStorage.setItem("cfg_volt_warn", voltWarn);
+  localStorage.setItem("cfg_volt_hi",   voltHi);
+
+  CFG = cargarConfig();
+  document.getElementById("config-panel").style.display = "none";
+  addLog(`✅ Config guardada — Temp: ${tempMin}°C a ${tempMax}°C | Volt: ${voltLo}-${voltWarn}-${voltHi}V`, "ok");
+}
+
+function resetConfig() {
+  localStorage.removeItem("cfg_temp_min");
+  localStorage.removeItem("cfg_temp_max");
+  localStorage.removeItem("cfg_volt_lo");
+  localStorage.removeItem("cfg_volt_warn");
+  localStorage.removeItem("cfg_volt_hi");
+  CFG = cargarConfig();
+  document.getElementById("config-panel").style.display = "none";
+  addLog("↺ Configuración restaurada a valores por defecto", "info");
+}
 
 // ══════════════════════════════════════════
 //  PWA — INSTALAR APP
@@ -604,21 +824,51 @@ function toggleMute() {
 //  AUDIO ALARMA
 // ══════════════════════════════════════════
 let audioContext;
-let alarmaActiva = false;
+let alarmaActiva  = false;
+let audioDesbloqueado = false;
 
-function sonarAlarma() {
-  if (alarmaActiva || silenciado) return;
+// ══════════════════════════════════════════
+//  ACTIVAR AUDIO (requiere gesto del usuario)
+// ══════════════════════════════════════════
+function activarAudio() {
+  if (!audioContext) {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Reproducir un sonido silencioso para desbloquear
+  const osc  = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  gain.gain.value = 0.001; // casi inaudible
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+  osc.start();
+  osc.stop(audioContext.currentTime + 0.1);
+
+  audioDesbloqueado = true;
+  document.getElementById("audio-banner").style.display = "none";
+  addLog("✅ Sonido de alarmas activado", "ok");
+
+  // Sonido de confirmación
+  setTimeout(() => sonarAlarma(true), 200);
+}
+
+function sonarAlarma(forzar = false) {
+  if (alarmaActiva) return;
+  if (!audioDesbloqueado && !forzar) {
+    // Mostrar banner si intentan sonar sin desbloquear
+    document.getElementById("audio-banner").style.display = "flex";
+    return;
+  }
   alarmaActiva = true;
   if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
   const osc  = audioContext.createOscillator();
   const gain = audioContext.createGain();
   osc.type = "sine";
-  osc.frequency.value = 900;
-  gain.gain.value = 0.2;
+  osc.frequency.value = forzar ? 600 : 900; // tono diferente en confirmación
+  gain.gain.value = forzar ? 0.1 : 0.2;
   osc.connect(gain);
   gain.connect(audioContext.destination);
   osc.start();
-  setTimeout(() => { osc.stop(); alarmaActiva = false; }, 700);
+  setTimeout(() => { osc.stop(); alarmaActiva = false; }, forzar ? 300 : 700);
 }
 
 // ══════════════════════════════════════════
@@ -652,8 +902,8 @@ function update(d) {
   // Temperatura
   document.getElementById("temp").innerHTML = (isNaN(temp) ? "--.-" : temp.toFixed(1)) + '<span class="hero-unit"> °C</span>';
   let tempState = "ok";
-  if (temp > TEMP_OK_MAX)      tempState = "err";
-  else if (temp < TEMP_OK_MIN) tempState = "warn";
+  if (temp > CFG.TEMP_OK_MAX)      tempState = "err";
+  else if (temp < CFG.TEMP_OK_MIN) tempState = "warn";
   applyHeroState("temp-card", "temp", tempState);
   const pct = Math.min(100, Math.max(0, ((temp - TEMP_SCALE_MIN) / (TEMP_SCALE_MAX - TEMP_SCALE_MIN)) * 100));
   const tBar = document.getElementById("temp-bar");
@@ -663,8 +913,8 @@ function update(d) {
   // Voltaje
   document.getElementById("voltaje").innerHTML = (isNaN(volt) ? "---" : volt.toFixed(1)) + '<span class="unit"> V</span>';
   let voltState = "ok";
-  if (volt === 0 || volt < VOLT_ERR_LO || volt > VOLT_ERR_HI) voltState = "err";
-  else if (volt < VOLT_WARN_LO) voltState = "warn";
+  if (volt === 0 || volt < CFG.VOLT_ERR_LO || volt > CFG.VOLT_ERR_HI) voltState = "err";
+  else if (volt < CFG.VOLT_WARN_LO) voltState = "warn";
   setCardColor("voltaje", voltState);
   document.getElementById("voltajeEstado").textContent = d.alarmaVoltaje || "NORMAL";
   setCardColor("voltajeEstado", voltState);
@@ -704,7 +954,7 @@ function update(d) {
     const detalleTxt = detalles.join("  |  ");
     document.getElementById("alarm-detail").textContent = detalleTxt;
 
-    sonarAlarma();
+    if (!silenciado) sonarAlarma();
     notificarAlarma(detalleTxt);  // notificación push al celular
     addLog("⚠ ALERTA — " + detalleTxt, "err");
 
